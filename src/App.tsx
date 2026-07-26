@@ -38,6 +38,14 @@ import GrokStudio from "./pages/GrokStudio";
 import PodStation from "./pages/PodStation";
 import JackyLive from "./pages/JackyLive";
 import AgentLab from "./pages/AgentLab";
+import Agents from "./pages/Agents";
+import Files from "./pages/Files";
+import Pods from "./pages/Pods";
+import SecretsAudit from "./pages/SecretsAudit";
+import Setup from "./pages/Setup";
+import Tasks from "./pages/Tasks";
+import TaskBoard from "./pages/TaskBoard";
+import TaskCalendar from "./pages/TaskCalendar";
 import RouterMesh from "./pages/RouterMesh";
 import RouterMeshDocs from "./pages/RouterMeshDocs";
 import PCDesktop from "./pages/PCDesktop";
@@ -205,6 +213,15 @@ const App = () => (
               <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
               <Route path="/jacky-live" element={<ProtectedRoute><JackyLive /></ProtectedRoute>} />
               <Route path="/agent-lab" element={<ProtectedRoute><AgentLab /></ProtectedRoute>} />
+              <Route path="/agents" element={<ProtectedRoute><Agents /></ProtectedRoute>} />
+              <Route path="/files" element={<ProtectedRoute><Files /></ProtectedRoute>} />
+              {/* /pods is the existing eYe Pod Station; the keeper's pod store mounts separately. */}
+              <Route path="/pod-store" element={<ProtectedRoute><Pods /></ProtectedRoute>} />
+              <Route path="/secrets-audit" element={<ProtectedRoute><SecretsAudit /></ProtectedRoute>} />
+              <Route path="/setup" element={<ProtectedRoute><Setup /></ProtectedRoute>} />
+              <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+              <Route path="/tasks/board" element={<ProtectedRoute><TaskBoard /></ProtectedRoute>} />
+              <Route path="/tasks/calendar" element={<ProtectedRoute><TaskCalendar /></ProtectedRoute>} />
               <Route path="/mesh" element={<ProtectedRoute><RouterMesh /></ProtectedRoute>} />
               <Route path="/mesh/docs" element={<ProtectedRoute><RouterMeshDocs /></ProtectedRoute>} />
               <Route

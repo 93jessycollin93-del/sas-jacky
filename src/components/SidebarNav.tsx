@@ -96,10 +96,24 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: "work",
+    label: "Work & Files",
+    items: [
+      { label: "✅ Tasks", href: "/tasks", title: "Task list with labels, status and priority — backed by Supabase with per-user RLS" },
+      { label: "🗂 Task Board", href: "/tasks/board", title: "Kanban view of the same tasks" },
+      { label: "📆 Task Calendar", href: "/tasks/calendar", title: "Due-date calendar view" },
+      { label: "📁 Files · VFS", href: "/files", title: "Virtual file system — import, export and snapshot working files" },
+      { label: "🧠 Agents Registry", href: "/agents", title: "Persisted agent registry (Supabase-backed, per-user)" },
+      { label: "🧊 Pod Store", href: "/pod-store", title: "Compression pod store — distinct from the eYe Pod Station" },
+    ],
+  },
+  {
     id: "build",
     label: "Build",
     items: [
       { label: "🧪 Agent R&D Lab", href: "/agent-lab", title: "Build agents on any provider, set a small or large context budget, run them for real, and export them as portable assets" },
+      { label: "🩺 Setup & Self-Test", href: "/setup", title: "Guided setup wizard plus a startup self-test of providers and keys" },
+      { label: "🔐 Secrets Audit", href: "/secrets-audit", title: "Audit configured secrets and provider key health" },
       { label: "🤖 Bot Foundry", href: "/bots" },
       { label: "🕸️ Bot Swarm", href: "/swarm" },
       { label: "🛰️ Control", href: "/control" },

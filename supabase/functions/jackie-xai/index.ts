@@ -7,8 +7,16 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const ALLOWED = new Set(["grok-2-latest", "grok-2-vision-latest", "grok-beta"]);
-const DEFAULT_MODEL = "grok-2-latest";
+const ALLOWED = new Set([
+  "grok-4.5",
+  "grok-4-latest",
+  "grok-3",
+  "grok-3-mini",
+  "grok-2-latest",
+  "grok-2-vision-latest",
+  "grok-beta",
+]);
+const DEFAULT_MODEL = "grok-4.5";
 const SECRET = "XAI_API_KEY";
 const BASE = "https://api.x.ai/v1/chat/completions";
 

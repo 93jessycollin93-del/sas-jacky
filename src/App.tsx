@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, useSearchParams, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useSearchParams, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -34,10 +34,17 @@ import SentinelDashboard from "./pages/SentinelDashboard";
 import SentinelBoard from "./pages/SentinelBoard";
 import ApexHub from "./pages/ApexHub";
 import AIProviders from "./pages/AIProviders";
+import GrokStudio from "./pages/GrokStudio";
 import PodStation from "./pages/PodStation";
 import JackyLive from "./pages/JackyLive";
+import AgentLab from "./pages/AgentLab";
+import AgentCompare from "./pages/AgentCompare";
 import RouterMesh from "./pages/RouterMesh";
 import RouterMeshDocs from "./pages/RouterMeshDocs";
+import PCDesktop from "./pages/PCDesktop";
+import { ERU_ALIASES } from "./lib/routeManifest";
+import RouteDebugOverlay from "./components/RouteDebugOverlay";
+
 const EruRouter = lazy(() => import("./eru/EruRouter"));
 const FloatingEditorNav = lazy(() => import("./eru/FloatingEditorNav"));
 const VisualizerLab = lazy(() => import("./eru/VisualizerLab"));
@@ -72,6 +79,11 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+const EruAliasRedirect = () => {
+  const location = useLocation();
+  return <Navigate to={`/eru${location.pathname}${location.search}${location.hash}`} replace />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
@@ -86,6 +98,7 @@ const App = () => (
               <Routes>
                 <Route path="/auth" element={<Auth />} />
                 <Route path="/sandbox" element={<Sandbox />} />
+                <Route path="/index" element={<Navigate to="/" replace />} />
               <Route
                 path="/"
                 element={
@@ -101,6 +114,14 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <Play />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/pc"
+                element={
+                  <ProtectedRoute>
+                    <PCDesktop />
                   </ProtectedRoute>
                 }
               />
@@ -181,8 +202,11 @@ const App = () => (
               <Route path="/sentinel/board" element={<ProtectedRoute><SentinelBoard /></ProtectedRoute>} />
               <Route path="/apex" element={<ProtectedRoute><ApexHub /></ProtectedRoute>} />
               <Route path="/providers" element={<ProtectedRoute><AIProviders /></ProtectedRoute>} />
+              <Route path="/grok" element={<ProtectedRoute><GrokStudio /></ProtectedRoute>} />
               <Route path="/pods" element={<ProtectedRoute><PodStation /></ProtectedRoute>} />
               <Route path="/jacky-live" element={<ProtectedRoute><JackyLive /></ProtectedRoute>} />
+              <Route path="/agent-lab" element={<ProtectedRoute><AgentLab /></ProtectedRoute>} />
+              <Route path="/agent-compare" element={<ProtectedRoute><AgentCompare /></ProtectedRoute>} />
               <Route path="/mesh" element={<ProtectedRoute><RouterMesh /></ProtectedRoute>} />
               <Route path="/mesh/docs" element={<ProtectedRoute><RouterMeshDocs /></ProtectedRoute>} />
               <Route
@@ -193,6 +217,18 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              {ERU_ALIASES.map(({ path }) => (
+                <Route
+                  key={`eru-alias-${path}`}
+                  path={path}
+                  element={
+                    <ProtectedRoute>
+                      <EruAliasRedirect />
+                    </ProtectedRoute>
+                  }
+                />
+              ))}
+
               <Route
                 path="/eru/*"
                 element={
@@ -203,6 +239,7 @@ const App = () => (
               />
               <Route path="*" element={<NotFound />} />
             </Routes>
+            <RouteDebugOverlay />
             <Suspense fallback={null}><FloatingEditorNav /></Suspense>
             </SandboxCatcher>
           </BrowserRouter>

@@ -293,6 +293,10 @@ export const PROVIDERS: ProviderDef[] = [
     helpUrl: "https://console.x.ai/",
     description: "Direct xAI. Only used if you paste your own key.",
     models: [
+      { id: "grok-4.5", label: "Grok 4.5" },
+      { id: "grok-4-latest", label: "Grok 4" },
+      { id: "grok-3", label: "Grok 3" },
+      { id: "grok-3-mini", label: "Grok 3 Mini" },
       { id: "grok-2-latest", label: "Grok 2" },
       { id: "grok-2-vision-latest", label: "Grok 2 Vision", vision: true },
       { id: "grok-beta", label: "Grok Beta" },

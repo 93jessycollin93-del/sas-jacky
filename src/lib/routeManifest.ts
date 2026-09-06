@@ -52,6 +52,7 @@ export const CORE_ROUTES: RouteEntry[] = [
   { path: "/pods", label: "eYe Pod Station", group: "ops" },
   { path: "/mesh", label: "Router Mesh", group: "ops" },
   { path: "/mesh/docs", label: "Router Mesh Docs", group: "ops" },
+  { path: "/github", label: "GitHub Sync", group: "ops" },
   { path: "/eru/visualizers", label: "Visualizer Lab", group: "eru" },
 ];
 

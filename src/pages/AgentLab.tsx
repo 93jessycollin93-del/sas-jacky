@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft, Beaker, Plus, Play, Square, Save, Trash2, Copy, Download,
-  Upload, FileDown, Gauge, Sparkles, CloudUpload, CloudDownload,
+  Upload, FileDown, Gauge, Sparkles, CloudUpload, CloudDownload, History, RotateCcw,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,10 +24,11 @@ import { cn } from "@/lib/utils";
 import { PROVIDERS, findProvider, type ProviderId } from "@/lib/jackie-providers";
 import { streamProviderChat, type ChatMessage } from "@/lib/jackie-provider-stream";
 import {
-  CONTEXT_PRESETS, type LabAgent, type RunRecord,
+  CONTEXT_PRESETS, type LabAgent, type RunRecord, type PromptVersion,
   listAgents, saveAgent, deleteAgent, newAgent, duplicateAgent,
   estimateTokens, fitToBudget, listRuns, recordRun, clearRuns,
   exportAgent, exportAll, exportRun, importAgentsFromFile,
+  listVersions, saveVersion, deleteVersion, deleteVersionsFor, diffSummary,
 } from "@/lib/agentLab";
 import { cloudAvailable, pushAgentsToCloud, pullAgentsFromCloud } from "@/lib/agentCloudSync";
 
@@ -44,6 +45,8 @@ export default function AgentLab() {
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [signedIn, setSignedIn] = useState(false);
   const [syncing, setSyncing] = useState<"push" | "pull" | null>(null);
+  const [versions, setVersions] = useState<PromptVersion[]>([]);
+  const [versionLabel, setVersionLabel] = useState("");
   const stopRef = useRef(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -54,6 +57,7 @@ export default function AgentLab() {
     if (list.length) {
       setSelectedId(list[0].id);
       setDraft(list[0]);
+      setVersions(listVersions(list[0].id));
     }
     cloudAvailable().then(setSignedIn);
   }, []);
@@ -103,6 +107,7 @@ export default function AgentLab() {
     setSelectedId(a.id);
     setDraft(a);
     setOutput("");
+    setVersions(listVersions(a.id));
   }
 
   function persist(next: LabAgent, note?: string) {
@@ -126,6 +131,8 @@ export default function AgentLab() {
 
   function remove(a: LabAgent) {
     deleteAgent(a.id);
+    deleteVersionsFor(a.id); // don't orphan this agent's prompt history
+    setVersions([]);
     const list = listAgents();
     setAgents(list);
     if (selectedId === a.id) {
@@ -455,6 +462,84 @@ export default function AgentLab() {
                     {output || "…"}
                   </div>
                 )}
+              </Card>
+
+              {/* Prompt versions — the prompt-engineering loop */}
+              <Card className="p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <History size={13} className="text-primary" />
+                  <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                    Prompt versions · {versions.length}
+                  </Label>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={versionLabel}
+                    onChange={(e) => setVersionLabel(e.target.value)}
+                    placeholder="label this version — e.g. 'added evidence rule'"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      saveVersion(draft.id, versionLabel, draft.system);
+                      setVersionLabel("");
+                      setVersions(listVersions(draft.id));
+                      toast({ title: "Version saved" });
+                    }}
+                  >
+                    <Save size={13} className="mr-1" /> Snapshot
+                  </Button>
+                </div>
+                {!versions.length && (
+                  <p className="text-[10px] text-muted-foreground">
+                    No versions yet. Snapshot a prompt before you change it, so you can always get back to the one that worked.
+                  </p>
+                )}
+                <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                  {versions.map((v) => {
+                    const d = diffSummary(v.system, draft.system);
+                    const current = d.added === 0 && d.removed === 0;
+                    return (
+                      <div key={v.id} className="flex items-center gap-2 rounded-sm bg-muted/20 px-2 py-1.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-mono text-[11px]">{v.label}</div>
+                          <div className="text-[9px] text-muted-foreground">
+                            {new Date(v.at).toLocaleString()} · ~{estimateTokens(v.system)} tok ·{" "}
+                            {current ? (
+                              <span className="text-primary">matches current prompt</span>
+                            ) : (
+                              <>vs current: +{d.added} −{d.removed} chars</>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Restore this prompt into the editor"
+                          disabled={current}
+                          onClick={() => {
+                            patch({ system: v.system });
+                            toast({ title: `Restored “${v.label}”`, description: "Save the agent to keep it." });
+                          }}
+                        >
+                          <RotateCcw size={12} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Delete version"
+                          onClick={() => {
+                            deleteVersion(v.id);
+                            setVersions(listVersions(draft.id));
+                          }}
+                        >
+                          <Trash2 size={12} />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
               </Card>
 
               {/* R&D notes */}

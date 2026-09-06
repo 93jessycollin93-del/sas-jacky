@@ -124,6 +124,63 @@ export function duplicateAgent(agent: LabAgent): LabAgent {
   return { ...agent, id: uid(), name: `${agent.name} (copy)`, createdAt: now, updatedAt: now };
 }
 
+/* ── Prompt versions ────────────────────────────────────────────────── */
+
+/**
+ * A saved snapshot of an agent's system prompt. Prompt engineering is the
+ * actual R&D loop — you change wording, run, compare, and need to get back to
+ * the version that worked. Versions are per-agent and immutable once saved.
+ */
+export interface PromptVersion {
+  id: string;
+  agentId: string;
+  label: string;
+  system: string;
+  at: number;
+}
+
+const VERSIONS_KEY = "jackie.agentlab.promptversions.v1";
+
+export function listVersions(agentId: string): PromptVersion[] {
+  return readJson<PromptVersion[]>(VERSIONS_KEY, [])
+    .filter((v) => v.agentId === agentId)
+    .sort((a, b) => b.at - a.at);
+}
+
+/** Snapshot the agent's current system prompt under a label. */
+export function saveVersion(agentId: string, label: string, system: string): PromptVersion {
+  const v: PromptVersion = { id: uid(), agentId, label: label.trim() || "untitled", system, at: Date.now() };
+  writeJson(VERSIONS_KEY, [v, ...readJson<PromptVersion[]>(VERSIONS_KEY, [])]);
+  return v;
+}
+
+export function deleteVersion(id: string): void {
+  writeJson(
+    VERSIONS_KEY,
+    readJson<PromptVersion[]>(VERSIONS_KEY, []).filter((v) => v.id !== id),
+  );
+}
+
+/** Drop every version belonging to an agent — used when the agent is deleted. */
+export function deleteVersionsFor(agentId: string): void {
+  writeJson(
+    VERSIONS_KEY,
+    readJson<PromptVersion[]>(VERSIONS_KEY, []).filter((v) => v.agentId !== agentId),
+  );
+}
+
+/**
+ * Character-level diff summary between two prompts. Deliberately simple: it
+ * reports how much changed, not a full patch, and is labelled as such in the UI.
+ */
+export function diffSummary(a: string, b: string): { added: number; removed: number } {
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  return { removed: Math.max(0, a.length - head - tail), added: Math.max(0, b.length - head - tail) };
+}
+
 /* ── Context budgeting ──────────────────────────────────────────────── */
 
 /**

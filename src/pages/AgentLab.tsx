@@ -22,15 +22,16 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { PROVIDERS, findProvider, type ProviderId } from "@/lib/jackie-providers";
-import { streamProviderChat, type ChatMessage } from "@/lib/jackie-provider-stream";
+import { type ChatMessage } from "@/lib/jackie-provider-stream";
 import {
   CONTEXT_PRESETS, type LabAgent, type RunRecord, type PromptVersion,
   listAgents, saveAgent, deleteAgent, newAgent, duplicateAgent,
-  estimateTokens, fitToBudget, listRuns, recordRun, clearRuns,
+  estimateTokens, fitToBudget, listRuns, clearRuns,
   exportAgent, exportAll, exportRun, importAgentsFromFile,
   listVersions, saveVersion, deleteVersion, deleteVersionsFor, diffSummary,
 } from "@/lib/agentLab";
-import { orchestrate, ORCHESTRATOR_MODELS } from "@/lib/jackie-orchestrator";
+import { ORCHESTRATOR_MODELS } from "@/lib/jackie-orchestrator";
+import { runAgent } from "@/lib/agentRunner";
 
 const DEFAULT_PROVIDER = (PROVIDERS[0]?.id ?? "lovable") as ProviderId;
 const DEFAULT_MODEL = PROVIDERS[0]?.models[0]?.id ?? "";
@@ -131,86 +132,24 @@ export default function AgentLab() {
 
     // Persist edits before running so a run always reflects a saved agent.
     const agent = persist(draft);
-    const messages: ChatMessage[] = [{ role: "user", content: text }];
-    const fit = fitToBudget(messages, agent.system, agent.contextBudget);
 
     setRunning(true);
     setOutput("");
     stopRef.current = false;
-    const started = performance.now();
-    let acc = "";
-    let meta: { servedBy?: string; model?: string } = {};
 
-    const finish = (error?: string) => {
-      const ms = performance.now() - started;
-      recordRun({
-        agentId: agent.id,
-        agentName: agent.name,
-        prompt: text,
-        output: acc,
-        servedBy: meta.servedBy,
-        model: meta.model,
-        ms,
-        promptTokens: fit.tokens,
-        droppedMessages: fit.dropped,
-        error,
-      });
-      // recordRun already persisted + capped the history; re-read it as the source of truth.
-      setRuns(listRuns());
-      setRunning(false);
-    };
-
-    if (agent.autoRoute) {
-      // Jacky's own routing brain, not the 14-provider catalog: classify the
-      // task, pick from its own model set, and fall back within that set on
-      // failure. Single-shot (no streaming) — the edge function returns the
-      // whole answer at once, so we say "routing…" rather than fake a stream.
-      setOutput("");
-      try {
-        const result = await orchestrate({
-          prompt: fit.messages[0]?.content ?? text,
-          system: agent.system,
-        });
-        acc = result.output;
-        meta = {
-          servedBy: `jacky-auto · ${result.kind}${result.attemptedFallback ? " (fell back)" : ""}`,
-          model: result.modelUsed,
-        };
-        setOutput(acc);
-        if (result.attemptedFallback) {
-          toast({ title: "Jacky's primary pick failed", description: `Fell back to ${result.modelUsed}` });
-        }
-        finish();
-      } catch (e) {
-        const message = e instanceof Error ? e.message : "auto-route failed";
-        toast({ title: "Auto-route failed", description: message, variant: "destructive" });
-        finish(message);
-      }
-      return;
-    }
-
-    await streamProviderChat({
-      provider: agent.provider,
-      model: agent.model,
-      messages: fit.messages,
-      system: agent.system,
-      fallback: agent.fallback,
-      onDelta: (t) => {
-        if (stopRef.current) return;
-        acc += t;
-        setOutput(acc);
-      },
+    const result = await runAgent(agent, text, {
+      onDelta: setOutput,
       onFallback: (from, to, reason) =>
         toast({ title: `Fell back: ${from} → ${to}`, description: reason }),
-      onDone: (m) => {
-        meta = { servedBy: m?.servedBy, model: m?.model };
-        finish();
-      },
-      onError: (e) => {
-        toast({ title: "Run failed", description: e, variant: "destructive" });
-        finish(e);
-      },
+      shouldStop: () => stopRef.current,
     });
+
+    if (result.error) {
+      toast({ title: "Run failed", description: result.error, variant: "destructive" });
+    }
+    // runAgent already recorded + capped the history; re-read it as the source of truth.
+    setRuns(listRuns());
+    setRunning(false);
   }
 
   return (

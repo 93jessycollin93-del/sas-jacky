@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft, Beaker, Plus, Play, Square, Save, Trash2, Copy, Download,
-  Upload, FileDown, Gauge, Sparkles, History, RotateCcw,
+  Upload, FileDown, Gauge, Sparkles, CloudUpload, CloudDownload, History, RotateCcw,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ import {
   exportAgent, exportAll, exportRun, importAgentsFromFile,
   listVersions, saveVersion, deleteVersion, deleteVersionsFor, diffSummary,
 } from "@/lib/agentLab";
+import { cloudAvailable, pushAgentsToCloud, pullAgentsFromCloud } from "@/lib/agentCloudSync";
 
 const DEFAULT_PROVIDER = (PROVIDERS[0]?.id ?? "lovable") as ProviderId;
 const DEFAULT_MODEL = PROVIDERS[0]?.models[0]?.id ?? "";
@@ -42,6 +43,8 @@ export default function AgentLab() {
   const [output, setOutput] = useState("");
   const [running, setRunning] = useState(false);
   const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [signedIn, setSignedIn] = useState(false);
+  const [syncing, setSyncing] = useState<"push" | "pull" | null>(null);
   const [versions, setVersions] = useState<PromptVersion[]>([]);
   const [versionLabel, setVersionLabel] = useState("");
   const stopRef = useRef(false);
@@ -56,7 +59,37 @@ export default function AgentLab() {
       setDraft(list[0]);
       setVersions(listVersions(list[0].id));
     }
+    cloudAvailable().then(setSignedIn);
   }, []);
+
+  async function pushToCloud() {
+    setSyncing("push");
+    try {
+      const { pushed } = await pushAgentsToCloud(agents);
+      toast({ title: `Pushed ${pushed} agent${pushed === 1 ? "" : "s"} to the cloud` });
+    } catch (e) {
+      toast({ title: "Push failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setSyncing(null);
+    }
+  }
+
+  async function pullFromCloud() {
+    setSyncing("pull");
+    try {
+      const cloud = await pullAgentsFromCloud();
+      // Replace-by-id: any local agent that also exists in the cloud is overwritten.
+      // No merge logic — that's the tradeoff for keeping sync simple and explicit.
+      cloud.forEach((a) => saveAgent(a));
+      const list = listAgents();
+      setAgents(list);
+      toast({ title: `Pulled ${cloud.length} agent${cloud.length === 1 ? "" : "s"} from the cloud` });
+    } catch (e) {
+      toast({ title: "Pull failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setSyncing(null);
+    }
+  }
 
   const provider = draft ? findProvider(draft.provider) : undefined;
   const models = provider?.models ?? [];
@@ -209,10 +242,37 @@ export default function AgentLab() {
         <Button variant="outline" size="sm" disabled={!agents.length} onClick={() => exportAll(agents)}>
           <Download size={13} className="mr-1" /> Export all
         </Button>
+        {signedIn && (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!agents.length || syncing !== null}
+              title="Upsert every local agent into your account"
+              onClick={pushToCloud}
+            >
+              <CloudUpload size={13} className="mr-1" /> {syncing === "push" ? "Pushing…" : "Push to cloud"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={syncing !== null}
+              title="Replace matching local agents with your cloud copies"
+              onClick={pullFromCloud}
+            >
+              <CloudDownload size={13} className="mr-1" /> {syncing === "pull" ? "Pulling…" : "Pull from cloud"}
+            </Button>
+          </>
+        )}
         <Button size="sm" onClick={create}>
           <Plus size={13} className="mr-1" /> New agent
         </Button>
       </header>
+      {!signedIn && (
+        <p className="px-3 py-1.5 text-[10px] text-muted-foreground border-b border-border bg-sidebar/60">
+          Signed out — agents stay local to this browser. <Link to="/auth" className="text-primary underline">Sign in</Link> to sync them to the cloud.
+        </p>
+      )}
 
       <div className="grid gap-4 p-4 lg:grid-cols-[260px_minmax(0,1fr)]">
         {/* Roster */}

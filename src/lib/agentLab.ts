@@ -251,7 +251,7 @@ export function clearRuns(): void {
 
 export const LAB_FORMAT = "jackie.agentlab/v1";
 
-function download(filename: string, body: string, mime = "application/json"): void {
+export function download(filename: string, body: string, mime = "application/json"): void {
   const blob = new Blob([body], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -263,7 +263,7 @@ function download(filename: string, body: string, mime = "application/json"): vo
   URL.revokeObjectURL(url);
 }
 
-function slug(s: string): string {
+export function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "agent";
 }
 

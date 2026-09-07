@@ -12,7 +12,7 @@
 // tell you which prompt actually scored better rather than which one felt
 // better.
 
-import { download, slug } from "./agentLab";
+import { download, slug, diffSummary } from "./agentLab";
 
 export type EvalCheckKind = "contains" | "not_contains" | "regex" | "min_chars" | "max_chars";
 
@@ -215,6 +215,148 @@ export function recordEvalRun(run: Omit<EvalRun, "id" | "at">): EvalRun {
 
 export function clearEvalRuns(suiteId: string): void {
   writeJson(EVAL_RUNS_KEY, readJson<EvalRun[]>(EVAL_RUNS_KEY, []).filter((r) => r.suiteId !== suiteId));
+}
+
+/* ── Comparing two scored runs ──────────────────────────────────────── */
+
+export type CaseDelta = "fixed" | "regressed" | "still_passing" | "still_failing";
+
+export interface CaseComparison {
+  caseId: string;
+  prompt: string;
+  before: boolean;
+  after: boolean;
+  delta: CaseDelta;
+  beforeMs: number;
+  afterMs: number;
+}
+
+export interface EvalComparison {
+  before: EvalRun;
+  after: EvalRun;
+  cases: CaseComparison[];
+  /**
+   * Cases scored in only one of the two runs — the suite was edited between
+   * them, so they have no counterpart. Reported rather than dropped: a
+   * comparison that quietly ignored them would overstate how comparable the
+   * two runs are.
+   */
+  unmatched: { caseId: string; prompt: string; onlyIn: "before" | "after" }[];
+  fixed: number;
+  regressed: number;
+  /** Change in cases passed, counting only cases present in both runs. */
+  scoreDelta: number;
+  promptChanged: boolean;
+  /** Character-level summary of the system-prompt change, not a patch. */
+  promptDiff: { added: number; removed: number };
+}
+
+/**
+ * Compare two scored runs of the same suite. Cases are matched by id, so a
+ * case edited between runs still matches (its prompt may differ — the newer
+ * text is shown) but a case added or removed does not, and lands in
+ * `unmatched`.
+ */
+export function compareEvalRuns(before: EvalRun, after: EvalRun): EvalComparison {
+  const beforeById = new Map(before.results.map((r) => [r.caseId, r]));
+  const afterById = new Map(after.results.map((r) => [r.caseId, r]));
+
+  const cases: CaseComparison[] = [];
+  const unmatched: EvalComparison["unmatched"] = [];
+
+  for (const a of after.results) {
+    const b = beforeById.get(a.caseId);
+    if (!b) {
+      unmatched.push({ caseId: a.caseId, prompt: a.prompt, onlyIn: "after" });
+      continue;
+    }
+    const delta: CaseDelta =
+      b.passed && a.passed ? "still_passing"
+      : !b.passed && !a.passed ? "still_failing"
+      : a.passed ? "fixed"
+      : "regressed";
+    cases.push({
+      caseId: a.caseId,
+      prompt: a.prompt,
+      before: b.passed,
+      after: a.passed,
+      delta,
+      beforeMs: b.ms,
+      afterMs: a.ms,
+    });
+  }
+
+  for (const b of before.results) {
+    if (!afterById.has(b.caseId)) {
+      unmatched.push({ caseId: b.caseId, prompt: b.prompt, onlyIn: "before" });
+    }
+  }
+
+  const fixed = cases.filter((c) => c.delta === "fixed").length;
+  const regressed = cases.filter((c) => c.delta === "regressed").length;
+
+  return {
+    before,
+    after,
+    cases,
+    unmatched,
+    fixed,
+    regressed,
+    scoreDelta: fixed - regressed,
+    promptChanged: before.system !== after.system,
+    promptDiff: diffSummary(before.system, after.system),
+  };
+}
+
+/** Download a run-to-run comparison as Markdown — the experiment write-up. */
+export function exportEvalComparison(cmp: EvalComparison): void {
+  const { before, after } = cmp;
+  const stamp = (r: EvalRun) => new Date(r.at).toLocaleString();
+  const changed = cmp.cases.filter((c) => c.delta === "fixed" || c.delta === "regressed");
+  const md = [
+    `# Eval comparison — ${after.suiteName}`,
+    "",
+    `| | Before | After |`,
+    "|---|---|---|",
+    `| When | ${stamp(before)} | ${stamp(after)} |`,
+    `| Agent | ${before.agentName} | ${after.agentName} |`,
+    `| Routing | ${before.routing} | ${after.routing} |`,
+    `| Score | ${before.passed}/${before.total} | ${after.passed}/${after.total} |`,
+    "",
+    `**Net change: ${cmp.scoreDelta >= 0 ? "+" : ""}${cmp.scoreDelta} case(s)** — ${cmp.fixed} fixed, ${cmp.regressed} regressed, over ${cmp.cases.length} case(s) present in both runs.`,
+    "",
+    ...(cmp.unmatched.length
+      ? [
+          `> ⚠ ${cmp.unmatched.length} case(s) appear in only one run (the suite was edited between them) and are excluded from the numbers above.`,
+          "",
+        ]
+      : []),
+    "## System prompt",
+    "",
+    cmp.promptChanged
+      ? `Changed — roughly ${cmp.promptDiff.added} character(s) added, ${cmp.promptDiff.removed} removed (summary, not a patch).`
+      : "Identical in both runs — any score change came from model non-determinism, not the prompt.",
+    "",
+    ...(cmp.promptChanged
+      ? ["### Before", "", "```", before.system, "```", "", "### After", "", "```", after.system, "```", ""]
+      : []),
+    "## Cases that changed",
+    "",
+    ...(changed.length
+      ? [
+          "| Case | Before | After |",
+          "|---|---|---|",
+          ...changed.map(
+            (c) =>
+              `| ${c.prompt.slice(0, 60).replace(/\n/g, " ")}${c.prompt.length > 60 ? "…" : ""} | ${c.before ? "✅" : "❌"} | ${c.after ? "✅" : "❌"} |`,
+          ),
+          "",
+        ]
+      : ["_No case changed outcome between these two runs._", ""]),
+    "_Checks are deterministic local assertions. A case changing outcome with an unchanged prompt reflects model non-determinism, not a measurement of quality._",
+    "",
+  ].join("\n");
+  download(`${slug(after.suiteName)}-comparison-${after.at}.md`, md, "text/markdown");
 }
 
 /* ── Portable assets ────────────────────────────────────────────────── */

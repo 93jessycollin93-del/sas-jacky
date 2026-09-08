@@ -14,12 +14,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import { findProvider } from "@/lib/jackie-providers";
-import { streamProviderChat, type ChatMessage } from "@/lib/jackie-provider-stream";
 import {
   type LabAgent, type ComparisonLane,
-  listAgents, fitToBudget, recordRun, exportComparison,
+  listAgents, fitToBudget, exportComparison,
 } from "@/lib/agentLab";
+import { runAgent, describeRouting } from "@/lib/agentRunner";
 
 type Lane = ComparisonLane & {
   agentId: string;
@@ -66,11 +65,12 @@ export default function AgentCompare() {
 
     const initial: Lane[] = chosen.map((a) => {
       const fit = fitToBudget([{ role: "user", content: text }], a.system, a.contextBudget);
+      const routing = describeRouting(a);
       return {
         agentId: a.id,
         agentName: a.name,
-        provider: findProvider(a.provider)?.label ?? a.provider,
-        model: a.model,
+        provider: routing.provider,
+        model: routing.model,
         contextBudget: a.contextBudget,
         output: "",
         promptTokens: fit.tokens,
@@ -83,60 +83,23 @@ export default function AgentCompare() {
     const update = (id: string, patch: Partial<Lane>) =>
       setLanes((ls) => ls.map((l) => (l.agentId === id ? { ...l, ...patch } : l)));
 
+    // Every lane goes through the shared runner, so an auto-route agent routes
+    // through Jacky's orchestrator here exactly as it does on the bench.
+    // Comparison runs land in the same history as bench runs.
     await Promise.all(
-      chosen.map(
-        (agent) =>
-          new Promise<void>((resolve) => {
-            const messages: ChatMessage[] = [{ role: "user", content: text }];
-            const fit = fitToBudget(messages, agent.system, agent.contextBudget);
-            const started = performance.now();
-            let acc = "";
-            let meta: { servedBy?: string; model?: string } = {};
-
-            const settle = (error?: string) => {
-              const ms = performance.now() - started;
-              update(agent.id, {
-                running: false,
-                ms,
-                error,
-                servedBy: meta.servedBy,
-                servedModel: meta.model,
-              });
-              // Comparison runs land in the same history as bench runs.
-              recordRun({
-                agentId: agent.id,
-                agentName: agent.name,
-                prompt: text,
-                output: acc,
-                servedBy: meta.servedBy,
-                model: meta.model,
-                ms,
-                promptTokens: fit.tokens,
-                droppedMessages: fit.dropped,
-                error,
-              });
-              resolve();
-            };
-
-            streamProviderChat({
-              provider: agent.provider,
-              model: agent.model,
-              messages: fit.messages,
-              system: agent.system,
-              fallback: agent.fallback,
-              onDelta: (t) => {
-                if (stopRef.current) return;
-                acc += t;
-                update(agent.id, { output: acc });
-              },
-              onDone: (m) => {
-                meta = { servedBy: m?.servedBy, model: m?.model };
-                settle();
-              },
-              onError: (e) => settle(e),
-            });
-          }),
-      ),
+      chosen.map(async (agent) => {
+        const result = await runAgent(agent, text, {
+          onDelta: (accumulated) => update(agent.id, { output: accumulated }),
+          shouldStop: () => stopRef.current,
+        });
+        update(agent.id, {
+          running: false,
+          ms: result.ms,
+          error: result.error,
+          servedBy: result.servedBy,
+          servedModel: result.model,
+        });
+      }),
     );
 
     setRunning(false);

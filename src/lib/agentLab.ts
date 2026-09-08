@@ -20,6 +20,15 @@ export interface LabAgent {
   contextBudget: number;
   /** Cascade to other providers if this one fails. */
   fallback: boolean;
+  /**
+   * Hand this run to Jacky's own situation-aware router instead of the
+   * configured provider/model. Jacky classifies the prompt (reasoning /
+   * coding / fast / long-context) and picks from its own small model set
+   * (see jackie-orchestrator.ts) — not the full 14-provider catalog — with
+   * a real try/catch fallback inside that set. When true, `provider`,
+   * `model`, and `fallback` above are ignored for this agent's runs.
+   */
+  autoRoute?: boolean;
   tags: string[];
   /** Free-form R&D notes — findings, prompt iterations, observations. */
   notes: string;
@@ -112,6 +121,7 @@ export function newAgent(provider: ProviderId, model: string): LabAgent {
     model,
     contextBudget: 8_000,
     fallback: true,
+    autoRoute: false,
     tags: [],
     notes: "",
     createdAt: now,
@@ -241,7 +251,7 @@ export function clearRuns(): void {
 
 export const LAB_FORMAT = "jackie.agentlab/v1";
 
-function download(filename: string, body: string, mime = "application/json"): void {
+export function download(filename: string, body: string, mime = "application/json"): void {
   const blob = new Blob([body], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -253,7 +263,7 @@ function download(filename: string, body: string, mime = "application/json"): vo
   URL.revokeObjectURL(url);
 }
 
-function slug(s: string): string {
+export function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "agent";
 }
 
@@ -371,6 +381,7 @@ export async function importAgentsFromFile(file: File): Promise<LabAgent[]> {
     id: uid(),
     tags: Array.isArray(a.tags) ? a.tags : [],
     contextBudget: typeof a.contextBudget === "number" ? a.contextBudget : 8_000,
+    autoRoute: a.autoRoute === true,
     createdAt: now,
     updatedAt: now,
   }));

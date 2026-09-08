@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft, Beaker, Plus, Play, Square, Save, Trash2, Copy, Download,
-  Upload, FileDown, Gauge, Sparkles, History, RotateCcw,
+  Upload, FileDown, Gauge, Sparkles, History, RotateCcw, Compass,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,14 +22,16 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { PROVIDERS, findProvider, type ProviderId } from "@/lib/jackie-providers";
-import { streamProviderChat, type ChatMessage } from "@/lib/jackie-provider-stream";
+import { type ChatMessage } from "@/lib/jackie-provider-stream";
 import {
   CONTEXT_PRESETS, type LabAgent, type RunRecord, type PromptVersion,
   listAgents, saveAgent, deleteAgent, newAgent, duplicateAgent,
-  estimateTokens, fitToBudget, listRuns, recordRun, clearRuns,
+  estimateTokens, fitToBudget, listRuns, clearRuns,
   exportAgent, exportAll, exportRun, importAgentsFromFile,
   listVersions, saveVersion, deleteVersion, deleteVersionsFor, diffSummary,
 } from "@/lib/agentLab";
+import { ORCHESTRATOR_MODELS } from "@/lib/jackie-orchestrator";
+import { runAgent } from "@/lib/agentRunner";
 
 const DEFAULT_PROVIDER = (PROVIDERS[0]?.id ?? "lovable") as ProviderId;
 const DEFAULT_MODEL = PROVIDERS[0]?.models[0]?.id ?? "";
@@ -130,57 +132,24 @@ export default function AgentLab() {
 
     // Persist edits before running so a run always reflects a saved agent.
     const agent = persist(draft);
-    const messages: ChatMessage[] = [{ role: "user", content: text }];
-    const fit = fitToBudget(messages, agent.system, agent.contextBudget);
 
     setRunning(true);
     setOutput("");
     stopRef.current = false;
-    const started = performance.now();
-    let acc = "";
-    let meta: { servedBy?: string; model?: string } = {};
 
-    const finish = (error?: string) => {
-      const ms = performance.now() - started;
-      recordRun({
-        agentId: agent.id,
-        agentName: agent.name,
-        prompt: text,
-        output: acc,
-        servedBy: meta.servedBy,
-        model: meta.model,
-        ms,
-        promptTokens: fit.tokens,
-        droppedMessages: fit.dropped,
-        error,
-      });
-      // recordRun already persisted + capped the history; re-read it as the source of truth.
-      setRuns(listRuns());
-      setRunning(false);
-    };
-
-    await streamProviderChat({
-      provider: agent.provider,
-      model: agent.model,
-      messages: fit.messages,
-      system: agent.system,
-      fallback: agent.fallback,
-      onDelta: (t) => {
-        if (stopRef.current) return;
-        acc += t;
-        setOutput(acc);
-      },
+    const result = await runAgent(agent, text, {
+      onDelta: setOutput,
       onFallback: (from, to, reason) =>
         toast({ title: `Fell back: ${from} → ${to}`, description: reason }),
-      onDone: (m) => {
-        meta = { servedBy: m?.servedBy, model: m?.model };
-        finish();
-      },
-      onError: (e) => {
-        toast({ title: "Run failed", description: e, variant: "destructive" });
-        finish(e);
-      },
+      shouldStop: () => stopRef.current,
     });
+
+    if (result.error) {
+      toast({ title: "Run failed", description: result.error, variant: "destructive" });
+    }
+    // runAgent already recorded + capped the history; re-read it as the source of truth.
+    setRuns(listRuns());
+    setRunning(false);
   }
 
   return (
@@ -241,7 +210,9 @@ export default function AgentLab() {
                 </Badge>
               </div>
               <div className="mt-1 text-[10px] text-muted-foreground truncate">
-                {findProvider(a.provider)?.label ?? a.provider} · {a.model.split("/").pop()}
+                {a.autoRoute
+                  ? <><Compass size={9} className="inline mr-1 -mt-0.5" />Auto-route (Jacky decides)</>
+                  : <>{findProvider(a.provider)?.label ?? a.provider} · {a.model.split("/").pop()}</>}
               </div>
               {a.role && <div className="mt-1 text-[10px] text-muted-foreground/80 truncate">{a.role}</div>}
             </Card>
@@ -268,12 +239,13 @@ export default function AgentLab() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className={cn("grid gap-3 sm:grid-cols-2", draft.autoRoute && "opacity-40 pointer-events-none")}>
                   <div className="space-y-1.5">
                     <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Provider</Label>
                     <select
                       className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={draft.provider}
+                      disabled={draft.autoRoute}
                       onChange={(e) => {
                         const pid = e.target.value as ProviderId;
                         patch({ provider: pid, model: findProvider(pid)?.models[0]?.id ?? "" });
@@ -296,6 +268,7 @@ export default function AgentLab() {
                     <select
                       className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={draft.model}
+                      disabled={draft.autoRoute}
                       onChange={(e) => patch({ model: e.target.value })}
                     >
                       {models.map((m) => (
@@ -305,6 +278,22 @@ export default function AgentLab() {
                       ))}
                     </select>
                   </div>
+                </div>
+
+                {/* Jacky's own routing brain — an honest, small alternative to the 14-provider catalog above */}
+                <div className={cn("rounded-md border p-3 space-y-2", draft.autoRoute ? "border-primary bg-primary/5" : "border-border")}>
+                  <div className="flex items-center gap-2">
+                    <Compass size={13} className="text-primary" />
+                    <Switch checked={!!draft.autoRoute} onCheckedChange={(v) => patch({ autoRoute: v })} id="auto-route" />
+                    <Label htmlFor="auto-route" className="text-xs font-medium">Auto-route (Jacky decides)</Label>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Hands the run to Jacky's own situation-aware router instead of the provider/model above: it
+                    classifies the prompt (reasoning / coding / fast / long-context) and picks from its own set of{" "}
+                    {ORCHESTRATOR_MODELS.length} models, with a real fallback inside that set on failure. This is
+                    Jacky's own routing philosophy, not the full 14-provider catalog — turn it off to pick a
+                    provider/model by hand.
+                  </p>
                 </div>
 
                 <div className="space-y-1.5">
@@ -353,8 +342,8 @@ export default function AgentLab() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Switch checked={draft.fallback} onCheckedChange={(v) => patch({ fallback: v })} id="fb" />
+                  <div className={cn("flex items-center gap-2", draft.autoRoute && "opacity-40 pointer-events-none")}>
+                    <Switch checked={draft.fallback} disabled={draft.autoRoute} onCheckedChange={(v) => patch({ fallback: v })} id="fb" />
                     <Label htmlFor="fb" className="text-xs text-muted-foreground">Auto-fallback to other providers</Label>
                   </div>
                   <div className="flex-1" />
@@ -383,11 +372,15 @@ export default function AgentLab() {
                   rows={3}
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Give the agent a task — this runs for real against the selected provider."
+                  placeholder={
+                    draft.autoRoute
+                      ? "Give the agent a task — Jacky will classify it and route it to one of its own models."
+                      : "Give the agent a task — this runs for real against the selected provider."
+                  }
                 />
                 <div className="flex items-center gap-2">
                   {running ? (
-                    <Button size="sm" variant="outline" onClick={() => { stopRef.current = true; }}>
+                    <Button size="sm" variant="outline" onClick={() => { stopRef.current = true; }} disabled={draft.autoRoute}>
                       <Square size={13} className="mr-1" /> Stop
                     </Button>
                   ) : (
@@ -395,7 +388,11 @@ export default function AgentLab() {
                       <Play size={13} className="mr-1" /> Run
                     </Button>
                   )}
-                  {running && <span className="font-mono text-[10px] text-muted-foreground animate-pulse">streaming…</span>}
+                  {running && (
+                    <span className="font-mono text-[10px] text-muted-foreground animate-pulse">
+                      {draft.autoRoute ? "routing…" : "streaming…"}
+                    </span>
+                  )}
                 </div>
                 {(output || running) && (
                   <div className="rounded-md bg-muted/30 p-3 font-mono text-xs whitespace-pre-wrap break-words max-h-80 overflow-y-auto">

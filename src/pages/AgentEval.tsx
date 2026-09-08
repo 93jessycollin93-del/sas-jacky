@@ -11,7 +11,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft, ClipboardCheck, Plus, Play, Square, Trash2, Save, FileDown,
-  Upload, Download, Beaker, History, CheckCircle2, XCircle,
+  Upload, Download, Beaker, History, CheckCircle2, XCircle, GitCompare,
+  ArrowRight, TrendingUp, TrendingDown, Minus,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ import {
   CHECK_LABELS, listSuites, saveSuite, deleteSuite, newSuite, newCase, newCheck,
   scoreCase, casePassed, listEvalRuns, recordEvalRun, clearEvalRuns,
   exportSuite, importSuitesFromFile, exportEvalRun,
+  compareEvalRuns, exportEvalComparison,
 } from "@/lib/agentEval";
 
 const CHECK_KINDS: EvalCheckKind[] = ["contains", "not_contains", "regex", "min_chars", "max_chars"];
@@ -44,6 +46,8 @@ export default function AgentEval() {
   const [running, setRunning] = useState(false);
   const [runningCaseId, setRunningCaseId] = useState<string | null>(null);
   const [history, setHistory] = useState<EvalRun[]>([]);
+  const [beforeId, setBeforeId] = useState("");
+  const [afterId, setAfterId] = useState("");
   const stopRef = useRef(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -59,7 +63,26 @@ export default function AgentEval() {
     }
   }, []);
 
+  // Keep the user's pairing while it stays valid; otherwise fall back to
+  // "previous vs latest". Guarded so it only writes when the current pair is
+  // unusable — writing the same values again is a no-op, so this converges.
+  useEffect(() => {
+    const ids = new Set(history.map((h) => h.id));
+    if (ids.has(beforeId) && ids.has(afterId) && beforeId !== afterId) return;
+    setAfterId(history[0]?.id ?? "");
+    setBeforeId(history[1]?.id ?? "");
+  }, [history, beforeId, afterId]);
+
   const agent = useMemo(() => agents.find((a) => a.id === agentId), [agents, agentId]);
+
+  // History is newest-first, so the default pairing compares the previous run
+  // (before) against the latest (after).
+  const comparison = useMemo(() => {
+    const b = history.find((h) => h.id === beforeId);
+    const a = history.find((h) => h.id === afterId);
+    if (!b || !a || b.id === a.id) return null;
+    return compareEvalRuns(b, a);
+  }, [history, beforeId, afterId]);
 
   const score = useMemo(() => {
     if (!results.length) return null;
@@ -508,6 +531,123 @@ export default function AgentEval() {
                   ))
                 )}
               </Card>
+
+              {/* The actual research question: did the prompt change help? */}
+              {history.length >= 2 && (
+                <Card className="p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <GitCompare size={13} className="text-primary" />
+                    <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                      Compare two runs
+                    </Label>
+                    <div className="flex-1" />
+                    {comparison && (
+                      <Button variant="outline" size="sm" onClick={() => exportEvalComparison(comparison)}>
+                        <FileDown size={13} className="mr-1" /> Export
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      className="rounded-md border border-input bg-background px-2 py-1 text-xs max-w-[45%]"
+                      value={beforeId}
+                      onChange={(e) => setBeforeId(e.target.value)}
+                    >
+                      {history.map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.passed}/{h.total} · {new Date(h.at).toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
+                    <ArrowRight size={13} className="text-muted-foreground shrink-0" />
+                    <select
+                      className="rounded-md border border-input bg-background px-2 py-1 text-xs max-w-[45%]"
+                      value={afterId}
+                      onChange={(e) => setAfterId(e.target.value)}
+                    >
+                      {history.map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.passed}/{h.total} · {new Date(h.at).toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {!comparison ? (
+                    <p className="text-[10px] text-muted-foreground">
+                      Pick two different runs to compare.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        {comparison.scoreDelta > 0 ? (
+                          <TrendingUp size={14} className="text-primary" />
+                        ) : comparison.scoreDelta < 0 ? (
+                          <TrendingDown size={14} className="text-destructive" />
+                        ) : (
+                          <Minus size={14} className="text-muted-foreground" />
+                        )}
+                        <span className="font-mono text-sm">
+                          {comparison.scoreDelta > 0 ? "+" : ""}{comparison.scoreDelta} case
+                          {Math.abs(comparison.scoreDelta) === 1 ? "" : "s"}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {comparison.fixed} fixed · {comparison.regressed} regressed ·{" "}
+                          {comparison.cases.length} compared
+                        </span>
+                      </div>
+
+                      <p className="text-[10px] text-muted-foreground">
+                        {comparison.promptChanged ? (
+                          <>
+                            System prompt changed — roughly {comparison.promptDiff.added} char(s) added,{" "}
+                            {comparison.promptDiff.removed} removed (summary, not a patch).
+                          </>
+                        ) : (
+                          <>
+                            System prompt identical in both runs — any change here is model
+                            non-determinism, not the prompt.
+                          </>
+                        )}
+                      </p>
+
+                      {comparison.unmatched.length > 0 && (
+                        <p className="text-[10px] text-destructive">
+                          ⚠ {comparison.unmatched.length} case(s) exist in only one run (the suite was
+                          edited between them) and are excluded from the numbers above.
+                        </p>
+                      )}
+
+                      {comparison.cases.filter((c) => c.delta === "fixed" || c.delta === "regressed").length === 0 ? (
+                        <p className="text-[10px] text-muted-foreground">
+                          No case changed outcome between these runs.
+                        </p>
+                      ) : (
+                        comparison.cases
+                          .filter((c) => c.delta === "fixed" || c.delta === "regressed")
+                          .map((c) => (
+                            <div key={c.caseId} className="flex items-center gap-2 border-t border-border pt-2 text-[11px]">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[9px] gap-1 shrink-0",
+                                  c.delta === "fixed" ? "text-primary" : "text-destructive",
+                                )}
+                              >
+                                {c.delta === "fixed" ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
+                                {c.delta}
+                              </Badge>
+                              <span className="truncate text-muted-foreground">
+                                {c.prompt.replace(/\n/g, " ")}
+                              </span>
+                            </div>
+                          ))
+                      )}
+                    </>
+                  )}
+                </Card>
+              )}
             </>
           )}
         </main>

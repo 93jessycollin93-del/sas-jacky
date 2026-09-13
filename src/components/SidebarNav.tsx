@@ -101,6 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "🧪 Agent R&D Lab", href: "/agent-lab", title: "Build agents on any provider, set a small or large context budget, run them for real, and export them as portable assets" },
       { label: "⚖️ Agent Compare", href: "/agent-compare", title: "Run one prompt across several agents side by side — measured latency, real outputs, exportable report" },
+      { label: "✅ Agent Evals", href: "/agent-evals", title: "Score an agent against a fixed suite of cases with deterministic checks — repeatable, so you can tell if a prompt change actually helped" },
       { label: "🤖 Bot Foundry", href: "/bots" },
       { label: "🕸️ Bot Swarm", href: "/swarm" },
       { label: "🛰️ Control", href: "/control" },

@@ -113,6 +113,7 @@ const NAV_GROUPS: NavGroup[] = [
     id: "games",
     label: "Games & Worlds",
     items: [
+      { label: "🧟 Zombie Survival", href: "/zombie-survival", title: "Third-person zombie survival — scavenge a dead town, board up, stay quiet (DayZ × Vein × Project Zomboid)" },
       { label: "⚔️ Play Game", href: "/play" },
       { label: "🐉 Realm Accord ↗", href: "https://dragon-chaos-wars.lovable.app", title: "Realm Accord — strategy game", external: true },
       { label: "🌐 Horizon Network ↗", href: "https://jadelounge.lovable.app", title: "Horizon Network — social network", external: true },
